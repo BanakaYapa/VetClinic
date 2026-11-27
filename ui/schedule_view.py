@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QCalendarWidget, 
                                QListWidget, QListWidgetItem, QLabel, QPushButton, 
                                QSplitter, QFrame, QMessageBox, QComboBox)
-from PySide6.QtCore import Qt, QDate, QLocale
+from PySide6.QtCore import Qt, QDate, QLocale, Signal
 from PySide6.QtGui import QColor, QFont, QIcon
 import qtawesome as qta
 from ui.appointment_form import AppointmentForm
@@ -54,8 +54,17 @@ class StylishCalendar(QCalendarWidget):
         painter.restore()
 
 class AppointmentWidget(QFrame):
-    def __init__(self, appt_data, delete_callback):
+    STATUS_COLORS = {
+        "Scheduled": "#FF9800",
+        "Completed": "#4CAF50",
+        "Cancelled": "#e53935",
+    }
+
+    def __init__(self, appt_data, delete_callback, status_callback):
         super().__init__()
+        self.appt_id = appt_data['id']
+        self.status_callback = status_callback
+
         # Semi-transparent white to show watermark but keep readability
         self.setStyleSheet("background-color: rgba(255, 255, 255, 0.7); border-radius: 6px; border: 1px solid #e0e0e0;")
         layout = QHBoxLayout(self)
@@ -75,12 +84,24 @@ class AppointmentWidget(QFrame):
         layout.addLayout(info_layout)
         
         layout.addStretch()
+
+        # Status Selector
+        current_status = appt_data.get('status') or 'Scheduled'
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["Scheduled", "Completed", "Cancelled"])
+        if current_status in self.STATUS_COLORS:
+            self.status_combo.setCurrentText(current_status)
+        self.status_combo.setCursor(Qt.PointingHandCursor)
+        self._apply_status_style(current_status)
+        self.status_combo.currentTextChanged.connect(self._on_status_changed)
+        layout.addWidget(self.status_combo)
         
         # Delete Button
         del_btn = QPushButton()
         del_btn.setIcon(qta.icon('fa5s.trash-alt', color='#D32F2F'))
         del_btn.setToolTip("Delete Appointment")
         del_btn.setFixedSize(32, 32)
+        del_btn.setCursor(Qt.PointingHandCursor)
         del_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
@@ -91,11 +112,46 @@ class AppointmentWidget(QFrame):
                 background-color: #ffebee;
             }
         """)
-        # Use a lambda to capture ID, but be careful with loops outside. Here we pass just the ID.
-        del_btn.clicked.connect(lambda: delete_callback(appt_data['id']))
+        del_btn.clicked.connect(lambda: delete_callback(self.appt_id))
         layout.addWidget(del_btn)
 
+    def _apply_status_style(self, status):
+        color = self.STATUS_COLORS.get(status, "#FF9800")
+        self.status_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {color};
+                color: white;
+                font-size: 11px;
+                font-weight: bold;
+                border: none;
+                border-radius: 10px;
+                padding: 4px 10px;
+                min-width: 90px;
+            }}
+            QComboBox::drop-down {{ border: none; width: 18px; }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 4px solid white;
+                margin-right: 6px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: white;
+                color: #333;
+                selection-background-color: #1976D2;
+                selection-color: white;
+                border: 1px solid #ddd;
+            }}
+        """)
+
+    def _on_status_changed(self, new_status):
+        self._apply_status_style(new_status)
+        self.status_callback(self.appt_id, new_status)
+
 class ScheduleView(QWidget):
+    appointments_changed = Signal()
+
     def __init__(self, db_manager):
         super().__init__()
         self.db = db_manager
@@ -189,7 +245,6 @@ class ScheduleView(QWidget):
         self.calendar.clicked.connect(self.on_date_selected)
         self.calendar.currentPageChanged.connect(self.on_page_changed)
         
-        left_layout.addWidget(self.calendar)
         left_layout.addWidget(self.calendar)
         
         # Legend or Info
@@ -315,13 +370,21 @@ class ScheduleView(QWidget):
             # Create list item
             item = QListWidgetItem(self.appt_list)
             # Create widget
-            widget = AppointmentWidget(appt, self.delete_appointment)
+            widget = AppointmentWidget(appt, self.delete_appointment, self.update_appointment_status)
             item.setSizeHint(widget.sizeHint())
             self.appt_list.setItemWidget(item, widget)
 
     def open_add_appointment(self):
         form = AppointmentForm(self, self.db, self.selected_date)
         if form.exec():
+            self.load_appointments()
+            self.appointments_changed.emit()
+
+    def update_appointment_status(self, appt_id, new_status):
+        if self.db.update_appointment_status(appt_id, new_status):
+            self.appointments_changed.emit()
+        else:
+            QMessageBox.critical(self, "Error", "Failed to update appointment status.")
             self.load_appointments()
 
     def delete_appointment(self, appt_id):
@@ -331,5 +394,6 @@ class ScheduleView(QWidget):
         if dialog.exec():
             if self.db.delete_appointment(appt_id):
                 self.load_appointments()
+                self.appointments_changed.emit()
             else:
                 QMessageBox.critical(self, "Error", "Failed to delete appointment.")

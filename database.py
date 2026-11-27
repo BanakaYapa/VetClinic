@@ -348,7 +348,9 @@ class DatabaseManager:
             return False
 
     def delete_patient(self, patient_id):
-        """Deletes a patient and all their associated treatments and appointments."""
+        """Deletes a patient and associated clinical records (appointments, treatments, GCE).
+        Unlinks any complaints associated with the patient so complaint history is preserved.
+        """
         if not self.connection:
             return False
         try:
@@ -357,7 +359,11 @@ class DatabaseManager:
             cursor.execute("DELETE FROM appointments WHERE patient_id = ?", (patient_id,))
             # 2. Delete Treatments
             cursor.execute("DELETE FROM treatments WHERE patient_id = ?", (patient_id,))
-            # 3. Delete Patient
+            # 3. Delete GCE records
+            cursor.execute("DELETE FROM gce WHERE patient_id = ?", (patient_id,))
+            # 4. Unlink Complaints (keep owner complaint record without dangling patient_id)
+            cursor.execute("UPDATE complaints SET patient_id = NULL WHERE patient_id = ?", (patient_id,))
+            # 5. Delete Patient
             cursor.execute("DELETE FROM patients WHERE id = ?", (patient_id,))
             
             self.connection.commit()

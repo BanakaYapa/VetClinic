@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                               QPushButton, QStackedWidget, QLabel, QFrame, QMenu, QWidgetAction)
+                               QPushButton, QStackedWidget, QLabel, QFrame, QMenu, QWidgetAction, QMessageBox)
 from PySide6.QtCore import Qt, QDate, QSize
 import qtawesome as qta
 from ui.sidebar import Sidebar
@@ -12,6 +12,7 @@ from ui.gce_form import GceForm
 from ui.views import PatientListView, PatientDetailView, TreatmentListView, ComplaintListView, GceListView
 from ui.schedule_view import ScheduleView
 from ui.custom_dialogs import ConfirmationDialog
+from ui.toast import Toast
 
 class MainWindow(QMainWindow):
     def __init__(self, db_manager):
@@ -67,11 +68,12 @@ class MainWindow(QMainWindow):
 
         # Page 3: Treatments (Global List)
         self.treatments_page = TreatmentListView(self.db)
+        self.treatments_page.treatments_changed.connect(self.dashboard_page.refresh)
         self.stack.addWidget(self.treatments_page)
 
-        # Page 4+: Placeholders for other pages
         # Page 4: Schedule
         self.schedule_page = ScheduleView(self.db)
+        self.schedule_page.appointments_changed.connect(self.dashboard_page.refresh)
         self.stack.addWidget(self.schedule_page)
 
         # Page 5+: Placeholders
@@ -188,14 +190,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(top_bar)
 
     def show_notifications(self):
-        # Count today's appointments
         today = QDate.currentDate().toString("yyyy-MM-dd")
         appts = self.db.get_appointments_by_date(today)
-        count = len(appts)
-        
-        # User requested to remove alerts, so this button currently does nothing visible
-        # except logic is executed.
-        pass
+        scheduled_count = sum(1 for a in appts if a.get('status', 'Scheduled') == 'Scheduled')
+        open_complaints = sum(1 for c in self.db.get_all_complaints() if c.get('status') != 'Resolved')
+
+        parts = []
+        if appts:
+            parts.append(f"{len(appts)} appointment{'s' if len(appts) != 1 else ''} today ({scheduled_count} pending)")
+        else:
+            parts.append("No appointments scheduled today")
+
+        if open_complaints:
+            parts.append(f"{open_complaints} open complaint{'s' if open_complaints != 1 else ''}")
+
+        Toast.show_message(self, " • ".join(parts), duration=4000)
 
     def show_admin_info(self):
         # User requested to remove alerts
@@ -376,16 +385,30 @@ class MainWindow(QMainWindow):
         }
         self.lbl_page_title.setText(titles.get(page_id, page_id.capitalize()))
         
-        # Auto-refresh if switching to treatments
-        if page_id == "treatments":
+        # Auto-refresh active page data
+        if page_id == "dashboard":
+            self.dashboard_page.refresh()
+        elif page_id == "clients":
+            self.patient_list.load_patients()
+            self.selected_patient_id = None
+            self.btn_add_treatment.setEnabled(False)
+            self.btn_edit_client.setEnabled(False)
+            self.btn_delete_client.setEnabled(False)
+        elif page_id == "treatments":
             self.treatments_page.load_treatments()
+        elif page_id == "schedule":
+            self.schedule_page.load_appointments()
+        elif page_id == "complaints":
+            self.complaints_page.load_complaints()
+        elif page_id == "gce":
+            self.gce_page.load_gce()
 
     def open_add_patient(self):
         form = PatientForm(self, self.db)
         if form.exec():
             self.patient_list.load_patients()
-            # If dashboard is open, refresh it too
             self.dashboard_page.refresh()
+            Toast.show_message(self, "New client added successfully.")
             
     def edit_current_client(self):
         if not self.selected_patient_id:
@@ -393,7 +416,6 @@ class MainWindow(QMainWindow):
         
         patient = self.db.get_patient(self.selected_patient_id)
         if patient:
-            # Convert Row to dict for easier handling if needed, though Row acts like dict mostly
             form = PatientForm(self, self.db, patient_data=dict(patient))
             if form.exec():
                 self.patient_list.load_patients()
@@ -402,6 +424,7 @@ class MainWindow(QMainWindow):
                 self.btn_add_treatment.setEnabled(False)
                 self.btn_delete_client.setEnabled(False)
                 self.btn_edit_client.setEnabled(False)
+                Toast.show_message(self, "Client profile updated.")
 
     def open_add_treatment(self):
         if not self.selected_patient_id:
@@ -409,36 +432,31 @@ class MainWindow(QMainWindow):
         
         form = TreatmentForm(self, self.db, self.selected_patient_id)
         if form.exec():
-            # self.detail_view.load_history(patient_id) # Removed detail view
             self.dashboard_page.refresh()
+            Toast.show_message(self, "Treatment record saved.")
 
     def on_patient_selected(self, patient_id):
         self.selected_patient_id = patient_id
         self.btn_add_treatment.setEnabled(True)
         self.btn_edit_client.setEnabled(True)
         self.btn_delete_client.setEnabled(True)
-        # self.detail_view.load_patient(patient_id) # Removed detail view
 
     def delete_current_client(self):
         if not self.selected_patient_id:
             return
             
-        # from PySide6.QtWidgets import QMessageBox # Removed
-        # reply = QMessageBox.question(...) # Removed
-        
         dialog = ConfirmationDialog(self, "Confirm Delete", 
-                                  "Are you sure you want to delete this client?\nThis will permanently delete profile, history, and appointments.")
+                                  "Are you sure you want to delete this client?\nThis will permanently delete profile, treatments, GCE exams, and appointments.")
         
         if dialog.exec():
             if self.db.delete_patient(self.selected_patient_id):
-                # Success
                 self.patient_list.load_patients()
                 self.dashboard_page.refresh()
-                # Reset selection state
                 self.selected_patient_id = None
                 self.btn_add_treatment.setEnabled(False)
                 self.btn_edit_client.setEnabled(False)
                 self.btn_delete_client.setEnabled(False)
+                Toast.show_message(self, "Client deleted.")
             else:
                 QMessageBox.critical(self, "Error", "Failed to delete patient.")
 
@@ -446,6 +464,7 @@ class MainWindow(QMainWindow):
         form = ComplaintForm(self, self.db)
         if form.exec():
             self.complaints_page.load_complaints()
+            Toast.show_message(self, "Complaint registered.")
 
     def resolve_complaint(self):
         selection = self.complaints_page.table.selectionModel().selectedRows()
@@ -453,6 +472,7 @@ class MainWindow(QMainWindow):
         complaint_id = int(self.complaints_page.table.item(selection[0].row(), 0).text())
         if self.db.update_complaint_status(complaint_id, "Resolved"):
             self.complaints_page.load_complaints()
+            Toast.show_message(self, "Complaint marked as resolved.")
 
     def delete_complaint(self):
         selection = self.complaints_page.table.selectionModel().selectedRows()
@@ -463,11 +483,13 @@ class MainWindow(QMainWindow):
             complaint_id = int(self.complaints_page.table.item(selection[0].row(), 0).text())
             if self.db.delete_complaint(complaint_id):
                 self.complaints_page.load_complaints()
+                Toast.show_message(self, "Complaint deleted.")
 
     def open_add_gce(self):
         form = GceForm(self, self.db)
         if form.exec():
             self.gce_page.load_gce()
+            Toast.show_message(self, "GCE examination saved.")
 
     def delete_gce_record(self):
         selection = self.gce_page.table.selectionModel().selectedRows()
@@ -478,6 +500,7 @@ class MainWindow(QMainWindow):
             gce_id = int(self.gce_page.table.item(selection[0].row(), 0).text())
             if self.db.delete_gce(gce_id):
                 self.gce_page.load_gce()
+                Toast.show_message(self, "GCE record deleted.")
 
     def clear_cache(self):
         """Clears temporary files (e.g. __pycache__)."""
@@ -493,21 +516,22 @@ class MainWindow(QMainWindow):
             cleared_count = 0
             # 1. Clear __pycache__ and .pyc files
             for root, dirs, files in os.walk("."):
-                # Clear directories
-                for d in dirs:
+                # Skip virtualenv and git internals
+                dirs[:] = [d for d in dirs if d not in (".venv", "venv", ".git")]
+                for d in list(dirs):
                     if d == "__pycache__":
                         shutil.rmtree(os.path.join(root, d))
+                        dirs.remove(d)
                         cleared_count += 1
-                # Clear individual .pyc files if any left over
                 for f in files:
                     if f.endswith(".pyc"):
                         try:
                             os.remove(os.path.join(root, f))
                             cleared_count += 1
-                        except:
+                        except OSError:
                             pass
             
-            QMessageBox.information(self, "Success", f"Application cache ({cleared_count} items) cleared successfully.")
+            Toast.show_message(self, f"Application cache ({cleared_count} items) cleared.")
 
     def apply_global_styles(self):
         # QDialog styles or other global adjustments if needed

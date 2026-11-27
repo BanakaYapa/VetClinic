@@ -29,9 +29,9 @@ class StatCard(QFrame):
         layout.setContentsMargins(20, 20, 20, 20)
         
         # Value
-        lbl_value = QLabel(str(value))
-        lbl_value.setStyleSheet(f"font-size: 36px; font-weight: bold; color: {color};")
-        layout.addWidget(lbl_value)
+        self.lbl_value = QLabel(str(value))
+        self.lbl_value.setStyleSheet(f"font-size: 36px; font-weight: bold; color: {color};")
+        layout.addWidget(self.lbl_value)
         
         # Title
         lbl_title = QLabel(title.upper())
@@ -43,6 +43,9 @@ class StatCard(QFrame):
             lbl_sub = QLabel(subtitle)
             lbl_sub.setStyleSheet("font-size: 12px; color: #999;")
             layout.addWidget(lbl_sub)
+
+    def set_value(self, value):
+        self.lbl_value.setText(str(value))
 
 class ClockCard(QFrame):
     def __init__(self):
@@ -202,8 +205,14 @@ class Dashboard(QWidget):
                 info_lbl.setStyleSheet("font-size: 14px; color: #333; font-weight: 500;")
                 
                 # Status
-                status_color = "#4CAF50" if appt.get('status') == 'Completed' else "#FF9800"
-                status_lbl = QLabel(appt.get('status', 'Scheduled'))
+                status = appt.get('status', 'Scheduled')
+                status_colors = {
+                    'Completed': '#4CAF50',
+                    'Cancelled': '#e53935',
+                    'Scheduled': '#FF9800',
+                }
+                status_color = status_colors.get(status, '#FF9800')
+                status_lbl = QLabel(status)
                 status_lbl.setStyleSheet(f"font-size: 11px; color: white; background-color: {status_color}; padding: 4px 8px; border-radius: 10px;")
                 
                 row_layout.addWidget(time_lbl)
@@ -221,11 +230,11 @@ class Dashboard(QWidget):
         
         cursor.execute("SELECT count(*) FROM treatments")
         treatment_count = cursor.fetchone()[0]
-        self.card_treatments.findChild(QLabel, "", Qt.FindChildrenRecursively).setText(str(treatment_count))
+        self.card_treatments.set_value(treatment_count)
 
         cursor.execute("SELECT count(*) FROM patients")
         patient_count = cursor.fetchone()[0]
-        self.card_clients.findChild(QLabel, "", Qt.FindChildrenRecursively).setText(str(patient_count))
+        self.card_clients.set_value(patient_count)
         
         # Refresh schedule
         self.load_appointments()

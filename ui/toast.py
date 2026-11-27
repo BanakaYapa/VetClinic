@@ -28,8 +28,7 @@ class Toast(QLabel):
         self.setMaximumWidth(350) 
         self.adjustSize()
         
-        # Layout & Positioning (Bottom Right)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.ToolTip) 
+        # Overlay inside the top-level window (Bottom Right)
         self.setAttribute(Qt.WA_TransparentForMouseEvents) 
         self.setAttribute(Qt.WA_DeleteOnClose)
         
@@ -38,19 +37,21 @@ class Toast(QLabel):
         self.setGraphicsEffect(self.graphics_effect)
         self.graphics_effect.setOpacity(0) # Start invisible
         
-        # Calculate Position
-        parent_geo = parent.geometry()
+        # Calculate Position relative to main_window
+        host = main_window if main_window else parent
+        parent_rect = host.rect()
         margin_x = 20
-        margin_y = 80 # A bit higher from bottom
+        margin_y = 30
         
         # Target Position (Bottom Right)
-        target_x = parent_geo.width() - self.width() - margin_x
-        target_y = parent_geo.height() - self.height() - margin_y
+        target_x = parent_rect.width() - self.width() - margin_x
+        target_y = parent_rect.height() - self.height() - margin_y
         
         # Start Position (Right Side Off-Screen)
-        start_x = parent_geo.width() + 20 
+        start_x = parent_rect.width() + 20 
         
         self.move(start_x, target_y)
+        self.raise_()
         self.show()
         
         # Animation Group (Slide In From Right)
@@ -58,7 +59,7 @@ class Toast(QLabel):
         
         # 1. Slide Left (pos)
         anim_pos = QPropertyAnimation(self, b"pos")
-        anim_pos.setDuration(500)
+        anim_pos.setDuration(400)
         anim_pos.setStartValue(QPoint(start_x, target_y))
         anim_pos.setEndValue(QPoint(target_x, target_y))
         anim_pos.setEasingCurve(QEasingCurve.OutCubic) 
@@ -66,31 +67,33 @@ class Toast(QLabel):
         
         # 2. Fade In
         anim_fade = QPropertyAnimation(self.graphics_effect, b"opacity")
-        anim_fade.setDuration(400)
+        anim_fade.setDuration(350)
         anim_fade.setStartValue(0)
         anim_fade.setEndValue(1)
         self.anim_group.addAnimation(anim_fade)
         
         self.anim_group.start()
         
-        # Timer to Fade Out
+        # One-shot Timer to Fade Out
         self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.fade_out)
         self.timer.start(duration)
         
     def fade_out(self):
         # Slide out to right
+        parent_width = self.parent().width() if self.parent() else self.x() + self.width()
         self.anim_group_out = QParallelAnimationGroup(self)
         
         anim_pos = QPropertyAnimation(self, b"pos")
-        anim_pos.setDuration(500)
+        anim_pos.setDuration(400)
         anim_pos.setStartValue(self.pos())
-        anim_pos.setEndValue(QPoint(self.parent().width() + 20, self.pos().y()))
+        anim_pos.setEndValue(QPoint(parent_width + 20, self.pos().y()))
         anim_pos.setEasingCurve(QEasingCurve.InCubic)
         self.anim_group_out.addAnimation(anim_pos)
 
         anim_fade = QPropertyAnimation(self.graphics_effect, b"opacity")
-        anim_fade.setDuration(500)
+        anim_fade.setDuration(400)
         anim_fade.setStartValue(1)
         anim_fade.setEndValue(0)
         self.anim_group_out.addAnimation(anim_fade)

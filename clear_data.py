@@ -11,7 +11,7 @@ if os.path.exists(DB_NAME):
         # Disable foreign keys to allow deleting in any order (though we should respect order)
         cursor.execute("PRAGMA foreign_keys = OFF;")
         
-        tables = ["appointments", "treatments", "patients"]
+        tables = ["appointments", "treatments", "gce", "complaints", "patients"]
         for table in tables:
             cursor.execute(f"DELETE FROM {table}")
             print(f"Cleared table: {table}")

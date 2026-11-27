@@ -98,6 +98,8 @@ class PatientListView(QWidget):
         self.patient_selected.emit(patient_id)
 
 class TreatmentListView(QWidget):
+    treatments_changed = Signal()
+
     def __init__(self, db_manager):
         super().__init__()
         self.db = db_manager
@@ -251,6 +253,7 @@ class TreatmentListView(QWidget):
         if dialog.exec():
             if self.db.delete_treatment(treatment_id):
                 self.load_treatments()
+                self.treatments_changed.emit()
 
 class PatientDetailView(QWidget):
     def __init__(self, db_manager):
